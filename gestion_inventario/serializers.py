@@ -1,49 +1,14 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import Producto,Cliente,Usuario,Marca,TipoBebida,Ubicacion,ProductoUbicacion
+from django.db.models import Sum
+from .models import Producto,Marca,TipoBebida,Ubicacion,ProductoUbicacion
 
-class ClienteSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Cliente
-        fields = ['id', 'nombre_cliente', 'email', 'telefono', 'direccion']
+#class ClienteSerializer(serializers.ModelSerializer):
+#    class Meta:
+#        model = Cliente
+#        fields = ['id', 'nombre_cliente', 'email', 'telefono', 'direccion']
 
-class RegistroUsuarioSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
 
-    class Meta:
-        model = User
-        fields = ['username', 'email', 'password']
-
-    def create(self, validated_data):
-        user = User.objects.create_user(
-            username=validated_data['username'],
-            email=validated_data['email'],
-            password=validated_data['password']
-        )
-
-        # Obtener el cliente (empresa) que se pasa en el registro
-        cliente = validated_data['cliente']
-
-        # Comprobar si es el primer usuario, asignando el rol de "admin" si lo es
-        if Usuario.objects.filter(cliente=cliente).count() == 0:
-            rol = "admin"  # Asignar rol de administrador al primer usuario
-        else:
-            rol = "trabajador"  # Asignar rol de trabajador a los demás usuarios
-
-        # Crear el usuario en el modelo Usuario con el rol correspondiente
-        usuario = Usuario.objects.create(
-            user=user,
-            cliente=cliente, 
-            rol=rol
-        )
-
-        return usuario
-
-class UsuarioSerializer(serializers.ModelSerializer):
-    cliente = ClienteSerializer(read_only=True) 
-    class Meta:
-        model = Usuario
-        fields = ['id', 'user', 'rol', 'cliente']
 
 class MarcaSerializer(serializers.ModelSerializer): 
     class Meta:
@@ -56,21 +21,40 @@ class TipoBebidaSerializer(serializers.ModelSerializer):
         fields = ['id', 'nombre_tipo']
 
 class ProductoSerializer(serializers.ModelSerializer):
-    marca = MarcaSerializer()
-    tipo_bebida = TipoBebidaSerializer()
+    stock_asignado = serializers.SerializerMethodField()
+    get_stock_total = serializers.SerializerMethodField()
+
+    marca = serializers.PrimaryKeyRelatedField(queryset=Marca.objects.all())
+    tipo_bebida = serializers.PrimaryKeyRelatedField(queryset=TipoBebida.objects.all())
+
     class Meta:
         model = Producto
-        fields = ['id','nombre_producto','marca','tipo_bebida','stock','precio_base']
+        fields = ['id', 'nombre_producto', 'marca', 'tipo_bebida', 'precio_base', 'stock', 'stock_asignado', 'stock_total']
+
+    def get_stock_asignado(self, obj):
+        # Calcula el stock asignado sumando las cantidades en ProductoUbicacion
+        return ProductoUbicacion.objects.filter(producto=obj).aggregate(total_asignado=Sum('cantidad'))['total_asignado'] or 0
+
+    def get_stock_total(self, obj):
+        # Calcula el stock disponible restando el stock asignado del stock total
+        return obj.stock + self.get_stock_asignado(obj)
+
 
 class UbicacionSerializer(serializers.ModelSerializer):
+    espacio_disponible = serializers.SerializerMethodField()
     class Meta:
         model = Ubicacion
-        fields = ['id','numero_pasillo','numero_repisa','capacidad_maxima']
+        fields = ['id','numero_pasillo','numero_repisa','capacidad_maxima','espacio_disponible']
+    
+    def get_espacio_disponible(self, obj):
+        return obj.espacio_disponible
 
 class ProductoUbicacionSerializer(serializers.ModelSerializer):
-    producto = ProductoSerializer()
-    ubicacion = UbicacionSerializer()
+    producto = serializers.PrimaryKeyRelatedField(queryset=Producto.objects.all())  # Producto usando PrimaryKeyRelatedField
+    ubicacion = serializers.PrimaryKeyRelatedField(queryset=Ubicacion.objects.all())  # Ubicacion usando PrimaryKeyRelatedField
+
     class Meta:
         model = ProductoUbicacion
-        fields = ['id','producto','ubicacion','cantidad']
+        fields = ['id', 'producto', 'ubicacion', 'cantidad']
+
 
